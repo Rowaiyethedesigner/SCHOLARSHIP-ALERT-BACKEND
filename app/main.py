@@ -1,4 +1,10 @@
-from fastapi import FastAPI, Depends, Query
+from fastapi import (
+    FastAPI,
+    Depends,
+    Query,
+    HTTPException,
+)
+from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -16,8 +22,8 @@ models.Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title="Scholarship Alert API",
     description=(
-        "Backend API for USA & Canada scholarship alerts "
-        "focused on Sustainable Development, Engineering, AI, and Agriculture"
+        "Backend API for USA & Canada scholarships focused on "
+        "Sustainable Development and SDG-aligned programs"
     ),
     version="1.0.0",
 )
@@ -32,6 +38,20 @@ def get_db():
     finally:
         db.close()
 
+# ----------------------------------
+# ADMIN API KEY (SECURITY)
+# ----------------------------------
+API_KEY_NAME = "x-api-key"
+ADMIN_API_KEY = "sk_scholarship_admin_2026_live"
+
+api_key_header = APIKeyHeader(
+    name=API_KEY_NAME,
+    auto_error=False
+)
+
+def verify_admin_key(api_key: str = Depends(api_key_header)):
+    if api_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 # ----------------------------------
 # ROOT
@@ -43,11 +63,9 @@ def root():
         "status": "OK"
     }
 
-
 # ----------------------------------
 # SCHOLARSHIP CALLS
 # ----------------------------------
-
 @app.post("/calls", response_model=schemas.CallResponse)
 def add_call(
     call: schemas.CallCreate,
@@ -80,22 +98,21 @@ def list_calls(
         sdg=sdg,
     )
 
-
 # ----------------------------------
-# ADMIN ACTIONS
+# ADMIN ACTIONS (PROTECTED)
 # ----------------------------------
-
 @app.patch("/calls/{call_id}/verify", response_model=schemas.CallResponse)
 def verify_call(
     call_id: int,
     db: Session = Depends(get_db),
+    _: None = Depends(verify_admin_key),
 ):
     """
-    Verify a scholarship call (admin action)
+    Verify a scholarship call (admin only)
     """
     call = crud.verify_call(db, call_id)
     if not call:
-        return {"error": "Call not found"}
+        raise HTTPException(status_code=404, detail="Call not found")
     return call
 
 
@@ -103,20 +120,19 @@ def verify_call(
 def deactivate_call(
     call_id: int,
     db: Session = Depends(get_db),
+    _: None = Depends(verify_admin_key),
 ):
     """
-    Deactivate (close) a scholarship call (admin action)
+    Deactivate (close) a scholarship call (admin only)
     """
     call = crud.deactivate_call(db, call_id)
     if not call:
-        return {"error": "Call not found"}
+        raise HTTPException(status_code=404, detail="Call not found")
     return call
-
 
 # ----------------------------------
 # SUBSCRIBERS
 # ----------------------------------
-
 @app.post("/subscribe")
 def subscribe(
     subscriber: schemas.SubscriberCreate,
@@ -125,4 +141,4 @@ def subscribe(
     """
     Subscribe an email address for alerts
     """
-    r
+    return crud.create_subscriber(db, subscriber)
