@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app import models, schemas
+from app.email_utils import send_email_alert
 
 
 # ----------------------------------
@@ -10,7 +11,7 @@ from app import models, schemas
 
 def create_call(db: Session, call: schemas.CallCreate):
     """
-    Create a new scholarship call
+    Create a new scholarship call (unverified by default)
     """
     db_call = models.ScholarshipCall(
         title=call.title,
@@ -40,7 +41,7 @@ def get_calls(
     sdg: Optional[str] = None,
 ):
     """
-    Get scholarship calls with optional filters
+    Fetch scholarship calls with optional filters
     """
     query = db.query(models.ScholarshipCall).filter(
         models.ScholarshipCall.active == True
@@ -67,7 +68,7 @@ def get_calls(
         )
 
     if sdg:
-        # sdg_tags is stored as a string like "SDG2,SDG9,SDG13"
+        # sdg_tags stored like: "SDG2,SDG9,SDG13"
         query = query.filter(
             models.ScholarshipCall.sdg_tags.contains(sdg)
         )
@@ -89,6 +90,10 @@ def verify_call(db: Session, call_id: int):
     call.verified = True
     db.commit()
     db.refresh(call)
+
+    # Notify subscribers AFTER verification
+    notify_subscribers(db, call)
+
     return call
 
 
@@ -122,3 +127,28 @@ def create_subscriber(db: Session, sub: schemas.SubscriberCreate):
     ).first()
 
     if existing:
+        return existing
+
+    db_sub = models.Subscriber(
+        email=sub.email,
+        country_interest=sub.country_interest,
+        field_interest=sub.field_interest,
+        degree_interest=sub.degree_interest,
+        active=True,
+    )
+    db.add(db_sub)
+    db.commit()
+    db.refresh(db_sub)
+    return db_sub
+
+
+def get_active_subscribers(db: Session):
+    """
+    Get all active subscribers
+    """
+    return db.query(models.Subscriber).filter(
+        models.Subscriber.active == True
+    ).all()
+
+
+# -------
