@@ -1,19 +1,30 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Query
 from sqlalchemy.orm import Session
+from typing import List, Optional
 
 from app.database import engine, SessionLocal
 from app import models, schemas, crud
 
-# Create database tables
+# ----------------------------------
+# DATABASE INITIALIZATION
+# ----------------------------------
 models.Base.metadata.create_all(bind=engine)
 
+# ----------------------------------
+# APP SETUP
+# ----------------------------------
 app = FastAPI(
     title="Scholarship Alert API",
-    description="Backend API for USA & Canada scholarships focused on Sustainable Development",
-    version="1.0.0"
+    description=(
+        "Backend API for USA & Canada scholarship alerts "
+        "focused on Sustainable Development, Engineering, AI, and Agriculture"
+    ),
+    version="1.0.0",
 )
 
-# Dependency to get DB session
+# ----------------------------------
+# DATABASE SESSION DEPENDENCY
+# ----------------------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -22,9 +33,9 @@ def get_db():
         db.close()
 
 
-# -------------------------
+# ----------------------------------
 # ROOT
-# -------------------------
+# ----------------------------------
 @app.get("/")
 def root():
     return {
@@ -33,29 +44,85 @@ def root():
     }
 
 
-# -------------------------
+# ----------------------------------
 # SCHOLARSHIP CALLS
-# -------------------------
+# ----------------------------------
+
 @app.post("/calls", response_model=schemas.CallResponse)
 def add_call(
     call: schemas.CallCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
+    """
+    Add a new scholarship call (unverified by default)
+    """
     return crud.create_call(db, call)
 
 
-@app.get("/calls", response_model=list[schemas.CallResponse])
-def list_calls(db: Session = Depends(get_db)):
-    return crud.get_calls(db)
+@app.get("/calls", response_model=List[schemas.CallResponse])
+def list_calls(
+    host_country: Optional[str] = Query(default=None),
+    degree_level: Optional[str] = Query(default=None),
+    field: Optional[str] = Query(default=None),
+    theme: Optional[str] = Query(default=None),
+    sdg: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """
+    List scholarship calls with optional filters
+    """
+    return crud.get_calls(
+        db,
+        host_country=host_country,
+        degree_level=degree_level,
+        field=field,
+        theme=theme,
+        sdg=sdg,
+    )
 
 
-# -------------------------
+# ----------------------------------
+# ADMIN ACTIONS
+# ----------------------------------
+
+@app.patch("/calls/{call_id}/verify", response_model=schemas.CallResponse)
+def verify_call(
+    call_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Verify a scholarship call (admin action)
+    """
+    call = crud.verify_call(db, call_id)
+    if not call:
+        return {"error": "Call not found"}
+    return call
+
+
+@app.patch("/calls/{call_id}/deactivate", response_model=schemas.CallResponse)
+def deactivate_call(
+    call_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Deactivate (close) a scholarship call (admin action)
+    """
+    call = crud.deactivate_call(db, call_id)
+    if not call:
+        return {"error": "Call not found"}
+    return call
+
+
+# ----------------------------------
 # SUBSCRIBERS
-# -------------------------
+# ----------------------------------
+
 @app.post("/subscribe")
 def subscribe(
     subscriber: schemas.SubscriberCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    return crud.create_subscriber(db, subscriber)
-
+    """
+    Subscribe an email address for alerts
+    """
+    r
