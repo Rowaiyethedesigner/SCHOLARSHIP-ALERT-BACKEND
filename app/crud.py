@@ -1,19 +1,13 @@
 from sqlalchemy.orm import Session
-from typing import Optional
-
+from sqlalchemy import or_
 from app import models, schemas
-from app.email_utils import send_email_alert
 
 
-# ----------------------------------
-# SCHOLARSHIP CALLS
-# ----------------------------------
-
+# =========================
+# CREATE SCHOLARSHIP CALL
+# =========================
 def create_call(db: Session, call: schemas.CallCreate):
-    """
-    Create a new scholarship call (unverified by default)
-    """
-    db_call = models.ScholarshipCall(
+    db_call = models.Call(
         title=call.title,
         host_country=call.host_country,
         field=call.field,
@@ -23,7 +17,7 @@ def create_call(db: Session, call: schemas.CallCreate):
         deadline=call.deadline,
         source_url=call.source_url,
         sdg_tags=call.sdg_tags,
-        verified=False,
+        verified=call.verified if call.verified is not None else False,
         active=True,
     )
     db.add(db_call)
@@ -32,79 +26,91 @@ def create_call(db: Session, call: schemas.CallCreate):
     return db_call
 
 
+# =========================
+# GET SCHOLARSHIPS (SEARCH + FILTER)
+# =========================
 def get_calls(
     db: Session,
-    host_country: Optional[str] = None,
-    degree_level: Optional[str] = None,
-    field: Optional[str] = None,
-    theme: Optional[str] = None,
-    sdg: Optional[str] = None,
+    q: str | None = None,
+    host_country: str | None = None,
+    degree_level: str | None = None,
+    field: str | None = None,
+    theme: str | None = None,
+    sdg: str | None = None,
 ):
-    """
-    Fetch scholarship calls with optional filters
-    """
-    query = db.query(models.ScholarshipCall).filter(
-        models.ScholarshipCall.active == True
-    )
+    query = db.query(models.Call)
 
-    if host_country:
+    # 🔍 KEYWORD SEARCH
+    if q:
+        search = f"%{q}%"
         query = query.filter(
-            models.ScholarshipCall.host_country == host_country
+            or_(
+                models.Call.title.ilike(search),
+                models.Call.field.ilike(search),
+                models.Call.theme.ilike(search),
+                models.Call.sdg_tags.ilike(search),
+                models.Call.host_country.ilike(search),
+            )
         )
+
+    # 🎯 FILTERS
+    if host_country:
+        query = query.filter(models.Call.host_country == host_country)
 
     if degree_level:
-        query = query.filter(
-            models.ScholarshipCall.degree_level == degree_level
-        )
+        query = query.filter(models.Call.degree_level == degree_level)
 
     if field:
-        query = query.filter(
-            models.ScholarshipCall.field == field
-        )
+        query = query.filter(models.Call.field.ilike(f"%{field}%"))
 
     if theme:
-        query = query.filter(
-            models.ScholarshipCall.theme == theme
-        )
+        query = query.filter(models.Call.theme.ilike(f"%{theme}%"))
 
     if sdg:
-        # sdg_tags stored like: "SDG2,SDG9,SDG13"
-        query = query.filter(
-            models.ScholarshipCall.sdg_tags.contains(sdg)
+        query = query.filter(models.Call.sdg_tags.ilike(f"%{sdg}%"))
+
+    # ✅ PUBLIC VISIBILITY RULES
+    query = query.filter(
+        models.Call.active == True,
+        models.Call.verified == True
+    )
+
+    return query.order_by(models.Call.deadline.asc()).all()
+
+
+# =========================
+# GET SINGLE SCHOLARSHIP
+# =========================
+def get_call_by_id(db: Session, call_id: int):
+    return (
+        db.query(models.Call)
+        .filter(
+            models.Call.id == call_id,
+            models.Call.active == True
         )
+        .first()
+    )
 
-    return query.all()
 
-
+# =========================
+# VERIFY SCHOLARSHIP (ADMIN)
+# =========================
 def verify_call(db: Session, call_id: int):
-    """
-    Mark a scholarship call as verified
-    """
-    call = db.query(models.ScholarshipCall).filter(
-        models.ScholarshipCall.id == call_id
-    ).first()
-
+    call = db.query(models.Call).filter(models.Call.id == call_id).first()
     if not call:
         return None
 
     call.verified = True
     db.commit()
     db.refresh(call)
-
-    # Notify subscribers AFTER verification
-    notify_subscribers(db, call)
-
     return call
 
 
+# =========================
+# DEACTIVATE SCHOLARSHIP
+# =========================
 def deactivate_call(db: Session, call_id: int):
-    """
-    Deactivate (close) a scholarship call
-    """
-    call = db.query(models.ScholarshipCall).filter(
-        models.ScholarshipCall.id == call_id
-    ).first()
-
+    call = db.query(models.Call).filter(models.Call.id == call_id).first()
     if not call:
         return None
 
@@ -112,43 +118,3 @@ def deactivate_call(db: Session, call_id: int):
     db.commit()
     db.refresh(call)
     return call
-
-
-# ----------------------------------
-# SUBSCRIBERS
-# ----------------------------------
-
-def create_subscriber(db: Session, sub: schemas.SubscriberCreate):
-    """
-    Add a new email subscriber
-    """
-    existing = db.query(models.Subscriber).filter(
-        models.Subscriber.email == sub.email
-    ).first()
-
-    if existing:
-        return existing
-
-    db_sub = models.Subscriber(
-        email=sub.email,
-        country_interest=sub.country_interest,
-        field_interest=sub.field_interest,
-        degree_interest=sub.degree_interest,
-        active=True,
-    )
-    db.add(db_sub)
-    db.commit()
-    db.refresh(db_sub)
-    return db_sub
-
-
-def get_active_subscribers(db: Session):
-    """
-    Get all active subscribers
-    """
-    return db.query(models.Subscriber).filter(
-        models.Subscriber.active == True
-    ).all()
-
-
-# -------
