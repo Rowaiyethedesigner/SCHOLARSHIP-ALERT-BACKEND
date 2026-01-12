@@ -1,7 +1,12 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 from datetime import date
+from typing import Optional
 
-class CallCreate(BaseModel):
+
+# =========================
+# BASE SCHOLARSHIP SCHEMA
+# =========================
+class CallBase(BaseModel):
     title: str
     host_country: str
     field: str
@@ -9,21 +14,32 @@ class CallCreate(BaseModel):
     degree_level: str
     funding_type: str
     deadline: date
-    source_url: str
+    source_url: HttpUrl
     sdg_tags: str
 
 
-class CallResponse(CallCreate):
+# =========================
+# ADMIN CREATE
+# =========================
+class CallCreate(CallBase):
+    verified: Optional[bool] = False
+
+
+# =========================
+# AUTOMATION INGESTION
+# =========================
+class CallIngest(CallBase):
+    source_name: Optional[str] = "automation"
+    confidence_score: Optional[float] = 0.0
+
+
+# =========================
+# RESPONSE MODEL
+# =========================
+class CallResponse(CallBase):
     id: int
     verified: bool
     active: bool
 
     class Config:
         orm_mode = True
-
-
-class SubscriberCreate(BaseModel):
-    email: str
-    country_interest: str
-    field_interest: str
-    degree_interest: str
