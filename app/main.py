@@ -5,12 +5,15 @@ from typing import List, Optional
 from app import models, schemas, crud
 from app.database import engine, SessionLocal
 
-app = FastAPI(title="Scholarship Alert API")
+app = FastAPI(
+    title="Scholarship Alert API",
+    version="1.1.0",
+)
 
 models.Base.metadata.create_all(bind=engine)
 
 # =========================
-# DB
+# DATABASE
 # =========================
 def get_db():
     db = SessionLocal()
@@ -35,11 +38,14 @@ def verify_admin(x_api_key: Optional[str] = Header(None)):
 # =========================
 @app.get("/")
 def root():
-    return {"status": "OK"}
+    return {
+        "status": "OK",
+        "message": "Scholarship Alert API is running"
+    }
 
 
 # =========================
-# PUBLIC
+# PUBLIC: SEARCH + PAGINATION
 # =========================
 @app.get("/calls", response_model=List[schemas.CallResponse])
 def list_calls(
@@ -61,23 +67,39 @@ def list_calls(
 
 
 # =========================
-# AUTOMATION INGESTION
+# AUTOMATION INGESTION (NEW)
 # =========================
 @app.post("/ingest/calls", response_model=schemas.CallResponse)
 def ingest_call(call: schemas.CallIngest, db: Session = Depends(get_db)):
+    """
+    Endpoint for automation, scrapers, and AI agents.
+    Ingested calls are NOT public until verified by admin.
+    """
     return crud.ingest_call(db, call)
 
 
 # =========================
-# ADMIN
+# ADMIN: MANUAL CREATE
 # =========================
-@app.post("/calls", response_model=schemas.CallResponse, dependencies=[Depends(verify_admin)])
+@app.post(
+    "/calls",
+    response_model=schemas.CallResponse,
+    dependencies=[Depends(verify_admin)],
+)
 def create_call(call: schemas.CallCreate, db: Session = Depends(get_db)):
     return crud.create_call(db, call)
 
-@app.patch("/calls/{call_id}/verify", response_model=schemas.CallResponse, dependencies=[Depends(verify_admin)])
-def verify(call_id: int, db: Session = Depends(get_db)):
-    result = crud.verify_call(db, call_id)
-    if not result:
+
+# =========================
+# ADMIN: VERIFY
+# =========================
+@app.patch(
+    "/calls/{call_id}/verify",
+    response_model=schemas.CallResponse,
+    dependencies=[Depends(verify_admin)],
+)
+def verify_call(call_id: int, db: Session = Depends(get_db)):
+    call = crud.verify_call(db, call_id)
+    if not call:
         raise HTTPException(status_code=404, detail="Not found")
-    return result
+    return call
