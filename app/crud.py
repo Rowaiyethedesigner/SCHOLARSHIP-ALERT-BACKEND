@@ -4,20 +4,11 @@ from app import models, schemas
 
 
 # =========================
-# CREATE SCHOLARSHIP CALL
+# CREATE (ADMIN)
 # =========================
 def create_call(db: Session, call: schemas.CallCreate):
     db_call = models.Call(
-        title=call.title,
-        host_country=call.host_country,
-        field=call.field,
-        theme=call.theme,
-        degree_level=call.degree_level,
-        funding_type=call.funding_type,
-        deadline=call.deadline,
-        source_url=call.source_url,
-        sdg_tags=call.sdg_tags,
-        verified=call.verified if call.verified is not None else False,
+        **call.dict(),
         active=True,
     )
     db.add(db_call)
@@ -27,20 +18,46 @@ def create_call(db: Session, call: schemas.CallCreate):
 
 
 # =========================
-# GET SCHOLARSHIPS (SEARCH + FILTER)
+# INGEST (AUTOMATION)
+# =========================
+def ingest_call(db: Session, call: schemas.CallIngest):
+    # 🔒 Duplicate protection (by title + URL)
+    existing = db.query(models.Call).filter(
+        models.Call.title == call.title,
+        models.Call.source_url == str(call.source_url),
+    ).first()
+
+    if existing:
+        return existing
+
+    db_call = models.Call(
+        **call.dict(exclude={"source_name", "confidence_score"}),
+        verified=False,
+        active=False,  # ❗ automation data is NOT public by default
+    )
+
+    db.add(db_call)
+    db.commit()
+    db.refresh(db_call)
+    return db_call
+
+
+# =========================
+# SEARCH + FILTER + PAGINATION
 # =========================
 def get_calls(
     db: Session,
-    q: str | None = None,
-    host_country: str | None = None,
-    degree_level: str | None = None,
-    field: str | None = None,
-    theme: str | None = None,
-    sdg: str | None = None,
+    q=None,
+    host_country=None,
+    degree_level=None,
+    field=None,
+    theme=None,
+    sdg=None,
+    limit=20,
+    offset=0,
 ):
     query = db.query(models.Call)
 
-    # 🔍 KEYWORD SEARCH
     if q:
         search = f"%{q}%"
         query = query.filter(
@@ -53,7 +70,6 @@ def get_calls(
             )
         )
 
-    # 🎯 FILTERS
     if host_country:
         query = query.filter(models.Call.host_country == host_country)
 
@@ -69,51 +85,38 @@ def get_calls(
     if sdg:
         query = query.filter(models.Call.sdg_tags.ilike(f"%{sdg}%"))
 
-    # ✅ PUBLIC VISIBILITY RULES
     query = query.filter(
         models.Call.active == True,
         models.Call.verified == True
     )
 
-    return query.order_by(models.Call.deadline.asc()).all()
-
-
-# =========================
-# GET SINGLE SCHOLARSHIP
-# =========================
-def get_call_by_id(db: Session, call_id: int):
     return (
-        db.query(models.Call)
-        .filter(
-            models.Call.id == call_id,
-            models.Call.active == True
-        )
-        .first()
+        query
+        .order_by(models.Call.deadline.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
     )
 
 
 # =========================
-# VERIFY SCHOLARSHIP (ADMIN)
+# ADMIN ACTIONS
 # =========================
 def verify_call(db: Session, call_id: int):
     call = db.query(models.Call).filter(models.Call.id == call_id).first()
     if not call:
         return None
-
     call.verified = True
+    call.active = True
     db.commit()
     db.refresh(call)
     return call
 
 
-# =========================
-# DEACTIVATE SCHOLARSHIP
-# =========================
 def deactivate_call(db: Session, call_id: int):
     call = db.query(models.Call).filter(models.Call.id == call_id).first()
     if not call:
         return None
-
     call.active = False
     db.commit()
     db.refresh(call)
