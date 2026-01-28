@@ -10,9 +10,7 @@ def relevance_score(call, query_params: dict):
     theme = (call.theme or "").lower()
     sdg = (call.sdg_tags or "").lower()
 
-    # =========================
     # KEYWORD RELEVANCE
-    # =========================
     if q:
         if q in title:
             score += 3.0
@@ -23,40 +21,20 @@ def relevance_score(call, query_params: dict):
         if q in sdg:
             score += 1.0
 
-    # =========================
     # DEGREE MATCH
-    # =========================
     if degree and degree in (call.degree_level or "").lower():
         score += 2.0
 
-    # =========================
     # COUNTRY MATCH
-    # =========================
     if country and country in (call.host_country or "").lower():
         score += 2.0
 
-    # =========================
-    # FIELD MATCH
-    # =========================
-    if q and q in field:
-        score += 2.0
-
-    # =========================
-    # THEME MATCH
-    # =========================
-    if q and q in theme:
-        score += 1.5
-
-    # =========================
-    # SDG MATCH
-    # =========================
-    if q and q in sdg:
-        score += 1.0
-
-    # =========================
-    # CONFIDENCE BOOST
-    # =========================
-    if hasattr(call, "confidence_score") and call.confidence_score:
-        score += float(call.confidence_score)
+    # SAFE CONFIDENCE BOOST
+    confidence = getattr(call, "confidence_score", None)
+    if confidence:
+        try:
+            score += float(confidence)
+        except:
+            pass
 
     return score
