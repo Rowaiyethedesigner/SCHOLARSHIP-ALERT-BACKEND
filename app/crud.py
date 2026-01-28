@@ -1,27 +1,18 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app import models, schemas
+from app.ai_ranker import relevance_score
 
 
-# =========================
-# CREATE (ADMIN)
-# =========================
 def create_call(db: Session, call: schemas.CallCreate):
-    db_call = models.Call(
-        **call.dict(),
-        active=True,
-    )
+    db_call = models.Call(**call.dict(), active=True)
     db.add(db_call)
     db.commit()
     db.refresh(db_call)
     return db_call
 
 
-# =========================
-# INGEST (AUTOMATION)
-# =========================
 def ingest_call(db: Session, call: schemas.CallIngest):
-    # 🔒 Duplicate protection (by title + URL)
     existing = db.query(models.Call).filter(
         models.Call.title == call.title,
         models.Call.source_url == str(call.source_url),
@@ -33,7 +24,7 @@ def ingest_call(db: Session, call: schemas.CallIngest):
     db_call = models.Call(
         **call.dict(exclude={"source_name", "confidence_score"}),
         verified=False,
-        active=False,  # ❗ automation data is NOT public by default
+        active=False,
     )
 
     db.add(db_call)
@@ -42,9 +33,6 @@ def ingest_call(db: Session, call: schemas.CallIngest):
     return db_call
 
 
-# =========================
-# SEARCH + FILTER + PAGINATION
-# =========================
 def get_calls(
     db: Session,
     q=None,
@@ -58,18 +46,13 @@ def get_calls(
 ):
     query = db.query(models.Call)
 
-    if q:
-        search = f"%{q}%"
-        query = query.filter(
-            or_(
-                models.Call.title.ilike(search),
-                models.Call.field.ilike(search),
-                models.Call.theme.ilike(search),
-                models.Call.sdg_tags.ilike(search),
-                models.Call.host_country.ilike(search),
-            )
-        )
+    # BASE FILTERS
+    query = query.filter(
+        models.Call.active == True,
+        models.Call.verified == True
+    )
 
+    # BASIC DB FILTERS
     if host_country:
         query = query.filter(models.Call.host_country == host_country)
 
@@ -85,23 +68,27 @@ def get_calls(
     if sdg:
         query = query.filter(models.Call.sdg_tags.ilike(f"%{sdg}%"))
 
-    query = query.filter(
-        models.Call.active == True,
-        models.Call.verified == True
+    results = query.all()
+
+    # =========================
+    # AI RELEVANCE RANKING
+    # =========================
+    query_params = {
+        "q": q,
+        "host_country": host_country,
+        "degree_level": degree_level,
+    }
+
+    ranked = sorted(
+        results,
+        key=lambda call: relevance_score(call, query_params),
+        reverse=True
     )
 
-    return (
-        query
-        .order_by(models.Call.deadline.asc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    # PAGINATION AFTER RANKING
+    return ranked[offset: offset + limit]
 
 
-# =========================
-# ADMIN ACTIONS
-# =========================
 def verify_call(db: Session, call_id: int):
     call = db.query(models.Call).filter(models.Call.id == call_id).first()
     if not call:
