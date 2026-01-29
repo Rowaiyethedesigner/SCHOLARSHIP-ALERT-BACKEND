@@ -1,41 +1,33 @@
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
-
+from fastapi.middleware.cors import CORSMiddleware
 from app import models, schemas, crud
-from app.database import engine, SessionLocal
+from app.database import engine, get_db
 
-app = FastAPI(
-    title="Scholarship Alert API",
-    version="1.1.0",
-)
+# =========================
+# INIT
+# =========================
 
 models.Base.metadata.create_all(bind=engine)
 
-# =========================
-# DATABASE
-# =========================
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
+app = FastAPI(title="Scholarship Alert API")
 
 # =========================
-# ADMIN AUTH
+# CORS
 # =========================
-ADMIN_API_KEY = "sk_scholarship_admin_2026_live"
 
-def verify_admin(x_api_key: Optional[str] = Header(None)):
-    if x_api_key != ADMIN_API_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # public API
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =========================
-# HEALTH
+# HEALTH CHECK
 # =========================
+
 @app.get("/")
 def root():
     return {
@@ -43,15 +35,18 @@ def root():
         "message": "Scholarship Alert API is running"
     }
 
+# =========================
+# PUBLIC ENDPOINTS
+# =========================
 
-# =========================
-# PUBLIC: SEARCH + PAGINATION
-# =========================
-@app.get("/calls", response_model=List[schemas.CallResponse])
-def list_calls(
-    q: Optional[str] = None,
-    host_country: Optional[str] = None,
-    degree_level: Optional[str] = None,
+@app.get("/calls", response_model=list[schemas.Call])
+def get_calls(
+    q: str | None = None,
+    host_country: str | None = None,
+    degree_level: str | None = None,
+    field: str | None = None,
+    theme: str | None = None,
+    sdg: str | None = None,
     limit: int = 20,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -61,45 +56,75 @@ def list_calls(
         q=q,
         host_country=host_country,
         degree_level=degree_level,
+        field=field,
+        theme=theme,
+        sdg=sdg,
         limit=limit,
         offset=offset,
     )
 
+# =========================
+# ADMIN ENDPOINTS
+# =========================
 
-# =========================
-# AUTOMATION INGESTION (NEW)
-# =========================
-@app.post("/ingest/calls", response_model=schemas.CallResponse)
-def ingest_call(call: schemas.CallIngest, db: Session = Depends(get_db)):
-    """
-    Endpoint for automation, scrapers, and AI agents.
-    Ingested calls are NOT public until verified by admin.
-    """
-    return crud.ingest_call(db, call)
-
-
-# =========================
-# ADMIN: MANUAL CREATE
-# =========================
-@app.post(
-    "/calls",
-    response_model=schemas.CallResponse,
-    dependencies=[Depends(verify_admin)],
-)
+@app.post("/calls", response_model=schemas.Call)
 def create_call(call: schemas.CallCreate, db: Session = Depends(get_db)):
-    return crud.create_call(db, call)
+    return crud.create_call(db=db, call=call)
 
 
-# =========================
-# ADMIN: VERIFY
-# =========================
-@app.patch(
-    "/calls/{call_id}/verify",
-    response_model=schemas.CallResponse,
-    dependencies=[Depends(verify_admin)],
-)
+@app.patch("/calls/{call_id}/verify", response_model=schemas.Call)
 def verify_call(call_id: int, db: Session = Depends(get_db)):
-    call = crud.verify_call(db, call_id)
+    call = crud.verify_call(db=db, call_id=call_id)
     if not call:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="Call not found")
     return call
+
+
+@app.patch("/calls/{call_id}/deactivate", response_model=schemas.Call)
+def deactivate_call(call_id: int, db: Session = Depends(get_db)):
+    call = crud.deactivate_call(db=db, call_id=call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return call
+
+# =========================
+# AUTOMATION / INGESTION
+# =========================
+
+@app.post("/ingest/calls", response_model=schemas.Call)
+def ingest_call(call: schemas.CallIngest, db: Session = Depends(get_db)):
+    return crud.ingest_call(db=db, call=call)
+
+# =========================
+# RESEARCH DATASET API
+# =========================
+
+@app.get("/research/dataset")
+def research_dataset(db: Session = Depends(get_db)):
+    calls = db.query(models.Call).filter(
+        models.Call.verified == True,
+        models.Call.active == True
+    ).all()
+
+    dataset = []
+
+    for c in calls:
+        dataset.append({
+            "id": c.id,
+            "title": c.title,
+            "host_country": c.host_country,
+            "field": c.field,
+            "theme": c.theme,
+            "degree_level": c.degree_level,
+            "funding_type": c.funding_type,
+            "deadline": str(c.deadline) if c.deadline else None,
+            "sdg_tags": c.sdg_tags,
+            "source_url": c.source_url,
+            "source_name": c.source_name,
+            "confidence_score": c.confidence_score,
+        })
+
+    return {
+        "count": len(dataset),
+        "dataset": dataset
+    }
