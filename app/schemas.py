@@ -1,45 +1,50 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 from datetime import date
 from typing import Optional
 
 
 # =========================
-# BASE SCHOLARSHIP SCHEMA
+# BASE SCHEMA
 # =========================
+
 class CallBase(BaseModel):
     title: str
-    host_country: str
-    field: str
-    theme: str
-    degree_level: str
-    funding_type: str
-    deadline: date
-    source_url: HttpUrl
-    sdg_tags: str
+    host_country: Optional[str] = None
+    field: Optional[str] = None
+    theme: Optional[str] = None
+    degree_level: Optional[str] = None
+    funding_type: Optional[str] = None
+    deadline: Optional[date] = None
+    source_url: Optional[str] = None
+    sdg_tags: Optional[str] = None
+    source_name: Optional[str] = None
+    confidence_score: Optional[str] = None
 
 
 # =========================
-# ADMIN CREATE
+# CREATE (ADMIN)
 # =========================
+
 class CallCreate(CallBase):
-    verified: Optional[bool] = False
+    pass
 
 
 # =========================
-# AUTOMATION INGESTION
+# INGEST (AUTOMATION)
 # =========================
+
 class CallIngest(CallBase):
-    source_name: Optional[str] = "automation"
-    confidence_score: Optional[float] = 0.0
+    pass
 
 
 # =========================
 # RESPONSE MODEL
 # =========================
-class CallResponse(CallBase):
+
+class Call(CallBase):
     id: int
     verified: bool
     active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True   # Pydantic v2 compatible
